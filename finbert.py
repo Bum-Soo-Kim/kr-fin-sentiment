@@ -24,10 +24,35 @@ def load_model():
     return tok, model, device, label_to_id
 
 @torch.no_grad()
-def score(text: str, tok, model, device, label_to_id) -> dict:
-    inputs = tok(text, return_tensors="pt", truncation=True, max_length=512).to(device)
-    probs = torch.softmax(model(**inputs).logits, dim=-1)[0]
-    return {label: float(probs[idx]) for label, idx in label_to_id.items()}
+def score_many(texts: list[str], tok, model, device, label_to_id) -> list[dict]:
+    if not texts:
+        return []
+    inputs = tok(texts, return_tensors="pt", truncation=True, max_length=512, padding=True).to(device)
+    probs = torch.softmax(model(**inputs).logits, dim=-1)
+    rows = []
+    for row in probs:
+        rows.append({label: float(row[idx]) for label, idx in label_to_id.items()})
+    return rows
+
+def score_news(news, tok, model, device, label_to_id, half_life_days: float, now: datetime, names: list[str]):
+    probs_list = score_many([art["text"] for art in news], tok, model, device, label_to_id)
+    scored = []
+    for art, probs in zip(news, probs_list):
+        signed = probs["positive"] - probs["negative"]
+        confidence = probs["positive"] + probs["negative"]
+        age_days = (now - art["datetime"]).total_seconds() / 86400
+        mentioned = mentions_stock(art["title"], art["text"], names)
+        scored.append({
+            "datetime": art["datetime"],
+            "title": art["title"],
+            "probs": probs,
+            "score": signed,
+            "confidence": confidence,
+            "time_w": apply_market_weight(time_weight(age_days, half_life_days), mentioned),
+            "market": not mentioned,
+            "label": max(probs, key=probs.get),
+        })
+    return scored
 
 def resolve_stock(query: str) -> tuple[str, str]:
     r = requests.get("https://ac.stock.naver.com/ac",
@@ -54,26 +79,6 @@ def fetch_news(code: str, n: int = 20):
             out.append({"datetime": dt, "title": title,
                         "text": f"{title} {body[:200]}".strip()})
     return out
-
-def score_news(news, tok, model, device, label_to_id, half_life_days: float, now: datetime, names: list[str]):
-    scored = []
-    for art in news:
-        probs = score(art["text"], tok, model, device, label_to_id)
-        signed = probs["positive"] - probs["negative"]
-        confidence = probs["positive"] + probs["negative"]
-        age_days = (now - art["datetime"]).total_seconds() / 86400
-        mentioned = mentions_stock(art["title"], art["text"], names)
-        scored.append({
-            "datetime": art["datetime"],
-            "title": art["title"],
-            "probs": probs,
-            "score": signed,
-            "confidence": confidence,
-            "time_w": apply_market_weight(time_weight(age_days, half_life_days), mentioned),
-            "market": not mentioned,
-            "label": max(probs, key=probs.get),
-        })
-    return scored
 
 def news_sentiment(query: str, tok, model, device, label_to_id,
                    n: int = 20, half_life_days: float = 1.0, now: datetime | None = None) -> dict:
