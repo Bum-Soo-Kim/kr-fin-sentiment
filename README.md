@@ -21,6 +21,11 @@ poetry run uvicorn app:app --host 0.0.0.0 --port 8000
 
 `GET /health`는 모델 없이 응답한다. `GET /sentiment?q=삼성전자`는 처음 호출할 때 모델을 읽는다.
 
+```bash
+docker build -t kr-fin-sentiment .
+docker run --rm -p 8000:8000 kr-fin-sentiment
+```
+
 ## 점수
 
 기사 점수는 `P(긍정) - P(부정)`이다. 범위는 -1에서 1이다.
