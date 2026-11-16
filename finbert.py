@@ -1,4 +1,5 @@
 import html
+import threading
 import requests
 import torch
 
@@ -12,6 +13,8 @@ MODEL = "snunlp/KR-FinBert-SC"
 H = {"User-Agent": "Mozilla/5.0"}
 KST = ZoneInfo("Asia/Seoul")
 TIMEOUT = 10
+# Sync handlers run on FastAPI's threadpool. Share one forward at a time.
+_infer_lock = threading.Lock()
 
 def load_model():
     tok = AutoTokenizer.from_pretrained(MODEL)
@@ -27,12 +30,13 @@ def load_model():
 def score_many(texts: list[str], tok, model, device, label_to_id) -> list[dict]:
     if not texts:
         return []
-    inputs = tok(texts, return_tensors="pt", truncation=True, max_length=512, padding=True).to(device)
-    probs = torch.softmax(model(**inputs).logits, dim=-1)
-    rows = []
-    for row in probs:
-        rows.append({label: float(row[idx]) for label, idx in label_to_id.items()})
-    return rows
+    with _infer_lock:
+        inputs = tok(texts, return_tensors="pt", truncation=True, max_length=512, padding=True).to(device)
+        probs = torch.softmax(model(**inputs).logits, dim=-1)
+        rows = []
+        for row in probs:
+            rows.append({label: float(row[idx]) for label, idx in label_to_id.items()})
+        return rows
 
 def score_news(news, tok, model, device, label_to_id, half_life_days: float, now: datetime, names: list[str]):
     probs_list = score_many([art["text"] for art in news], tok, model, device, label_to_id)
