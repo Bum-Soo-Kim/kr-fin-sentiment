@@ -5,6 +5,8 @@ import torch
 from datetime import datetime
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
+from scoring import aggregate, time_weight
+
 MODEL = "snunlp/KR-FinBert-SC"
 H = {"User-Agent": "Mozilla/5.0"}
 
@@ -54,49 +56,16 @@ def score_news(news, tok, model, device, label_to_id, half_life_days: float, now
         signed = probs["positive"] - probs["negative"]
         confidence = probs["positive"] + probs["negative"]
         age_days = (now - art["datetime"]).total_seconds() / 86400
-        time_w = 0.5 ** (age_days / half_life_days)
         scored.append({
             "datetime": art["datetime"],
             "title": art["title"],
             "probs": probs,
             "score": signed,
             "confidence": confidence,
-            "time_w": time_w,
+            "time_w": time_weight(age_days, half_life_days),
             "label": max(probs, key=probs.get),
         })
     return scored
-
-def aggregate(scored, label_to_id, half_life_days: float) -> dict:
-    num = den = 0.0
-    prob_num = {label: 0.0 for label in label_to_id}
-    for art in scored:
-        w = art["time_w"] * art["confidence"]
-        num += art["score"] * w
-        den += w
-        for label, p in art["probs"].items():
-            prob_num[label] += p * w
-    raw = num / den if den else 0.0
-
-    counts = {label: 0 for label in label_to_id}
-    for art in scored:
-        counts[art["label"]] += 1
-
-    articles = [{
-        "datetime": art["datetime"],
-        "title": art["title"],
-        "probs": {k: round(v, 4) for k, v in art["probs"].items()},
-        "score": round(art["score"], 4),
-        "weight": round(art["time_w"], 4),
-    } for art in scored]
-    articles.sort(key=lambda a: a["datetime"], reverse=True)
-    return {
-        "half_life_days": half_life_days,
-        "counts": counts,
-        "model_probs": {k: round(v / den, 4) if den else 0.0 for k, v in prob_num.items()},
-        "score_-1to1": round(raw, 4),
-        "score_10pt": round((raw + 1) / 2 * 10, 2),
-        "articles": articles,
-    }
 
 def news_sentiment(query: str, tok, model, device, label_to_id,
                    n: int = 20, half_life_days: float = 1.0, now: datetime | None = None) -> dict:
