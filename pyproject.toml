@@ -1,0 +1,20 @@
+[project]
+name = "kr-fin-sentiment"
+version = "0.1.0"
+description = "KR-FinBert 모델 활용 뉴스 평가 분석"
+authors = [
+    {name = "Bum-Soo-Kim"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.15,<3.16"
+dependencies = [
+    "torch (>=2.15.0,<3.0.0)",
+    "requests (>=2.34.2,<3.0.0)",
+    "transformers (>=5.23.0,<6.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
