@@ -1,6 +1,26 @@
 def time_weight(age_days: float, half_life_days: float) -> float:
     return 0.5 ** (age_days / half_life_days)
 
+MARKET_WEIGHT = 0.25
+
+def stock_needles(query: str, official: str) -> list[str]:
+    needles = []
+    for name in (official, query):
+        if not name or (name.isdigit() and len(name) == 6):
+            continue
+        if name not in needles:
+            needles.append(name)
+    return needles
+
+def mentions_stock(title: str, text: str, needles: list[str]) -> bool:
+    if not needles:
+        return True
+    blob = f"{title}\n{text}"
+    return any(needle in blob for needle in needles)
+
+def apply_market_weight(time_w: float, mentioned: bool) -> float:
+    return time_w if mentioned else time_w * MARKET_WEIGHT
+
 def aggregate(scored, label_to_id, half_life_days: float) -> dict:
     num = den = 0.0
     prob_num = {label: 0.0 for label in label_to_id}

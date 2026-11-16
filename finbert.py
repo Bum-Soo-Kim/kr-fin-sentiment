@@ -5,7 +5,7 @@ import torch
 from datetime import datetime
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-from scoring import aggregate, time_weight
+from scoring import aggregate, apply_market_weight, mentions_stock, stock_needles, time_weight
 
 MODEL = "snunlp/KR-FinBert-SC"
 H = {"User-Agent": "Mozilla/5.0"}
@@ -26,15 +26,18 @@ def score(text: str, tok, model, device, label_to_id) -> dict:
     probs = torch.softmax(model(**inputs).logits, dim=-1)[0]
     return {label: float(probs[idx]) for label, idx in label_to_id.items()}
 
-def resolve_code(query: str) -> str:
-    if query.isdigit() and len(query) == 6:
-        return query
+def resolve_stock(query: str) -> tuple[str, str]:
     r = requests.get("https://ac.stock.naver.com/ac",
                      params={"q": query, "target": "stock"}, headers=H).json()
     items = r.get("items") or []
+    if query.isdigit() and len(query) == 6:
+        for item in items:
+            if item.get("code") == query:
+                return query, item.get("name") or ""
+        return query, ""
     if not items:
         raise LookupError(f"종목을 찾지 못했습니다: {query}")
-    return items[0]["code"]
+    return items[0]["code"], items[0].get("name") or query
 
 def fetch_news(code: str, n: int = 20):
     r = requests.get(f"https://m.stock.naver.com/api/news/stock/{code}",
@@ -49,37 +52,43 @@ def fetch_news(code: str, n: int = 20):
                         "text": f"{title} {body[:200]}".strip()})
     return out
 
-def score_news(news, tok, model, device, label_to_id, half_life_days: float, now: datetime):
+def score_news(news, tok, model, device, label_to_id, half_life_days: float, now: datetime, names: list[str]):
     scored = []
     for art in news:
         probs = score(art["text"], tok, model, device, label_to_id)
         signed = probs["positive"] - probs["negative"]
         confidence = probs["positive"] + probs["negative"]
         age_days = (now - art["datetime"]).total_seconds() / 86400
+        mentioned = mentions_stock(art["title"], art["text"], names)
         scored.append({
             "datetime": art["datetime"],
             "title": art["title"],
             "probs": probs,
             "score": signed,
             "confidence": confidence,
-            "time_w": time_weight(age_days, half_life_days),
+            "time_w": apply_market_weight(time_weight(age_days, half_life_days), mentioned),
+            "market": not mentioned,
             "label": max(probs, key=probs.get),
         })
     return scored
 
 def news_sentiment(query: str, tok, model, device, label_to_id,
                    n: int = 20, half_life_days: float = 1.0, now: datetime | None = None) -> dict:
-    code = resolve_code(query)
+    code, official = resolve_stock(query)
     news = fetch_news(code, n)
     if not news:
         return {"code": code, "n": 0, "score_10pt": None}
     if now is None:
         now = datetime.now()
-    scored = score_news(news, tok, model, device, label_to_id, half_life_days, now)
+    names = stock_needles(query, official)
+    scored = score_news(news, tok, model, device, label_to_id, half_life_days, now, names)
     result = aggregate(scored, label_to_id, half_life_days)
     result["code"] = code
     result["n"] = len(news)
     result["as_of"] = now
+    market = {art["title"]: art["market"] for art in scored}
+    for art in result["articles"]:
+        art["market"] = market.get(art["title"], False)
     return result
 
 def print_result(name: str, result: dict, show: int = 5) -> None:
@@ -98,9 +107,10 @@ def print_result(name: str, result: dict, show: int = 5) -> None:
         if len(title) > 48:
             title = title[:48] + "…"
         p = art["probs"]
+        mark = "시황  " if art.get("market") else ""
         print(f"  {art['datetime']:%m-%d %H:%M}  "
               f"부정 {p['negative']:.2f} 중립 {p['neutral']:.2f} 긍정 {p['positive']:.2f}  "
-              f"{art['score']:+.2f}  w={art['weight']:.2f}  {title}")
+              f"{art['score']:+.2f}  w={art['weight']:.2f}  {mark}{title}")
 
 if __name__ == "__main__":
     print("모델 불러오는 중", flush=True)
