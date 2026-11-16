@@ -26,6 +26,8 @@ docker build -t kr-fin-sentiment .
 docker run --rm -p 8000:8000 kr-fin-sentiment
 ```
 
+이미지는 CPU용 `torch`를 쓰고, 모델 가중치는 빌드할 때 `/opt/hf`에 넣어 둔다. 컨테이너를 새로 띄워도 첫 요청에서 가중치를 다시 받지 않는다. 이 경로에 볼륨을 얹으면 넣어 둔 파일이 가려진다.
+
 ## 점수
 
 기사 점수는 `P(긍정) - P(부정)`이다. 범위는 -1에서 1이다.
