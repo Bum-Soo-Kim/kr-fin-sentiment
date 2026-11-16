@@ -4,7 +4,7 @@
 
 ## 실행
 
-Python 3.15와 Poetry가 필요하다.
+Python 3.12 이상과 Poetry가 필요하다. 이 저장소의 잠금 파일은 Python 3.15에서 만들었다.
 
 ```bash
 poetry install
@@ -12,6 +12,14 @@ poetry run python finbert.py
 ```
 
 종목명이나 6자리 코드를 입력한다. 여러 개면 쉼표로 구분한다. 빈 입력이나 `q`로 종료한다. 처음 실행하면 모델 가중치를 받는다.
+
+HTTP로 보려면
+
+```bash
+poetry run uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+`GET /health`는 모델 없이 응답한다. `GET /sentiment?q=삼성전자`는 처음 호출할 때 모델을 읽는다.
 
 ## 점수
 
