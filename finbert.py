@@ -3,12 +3,15 @@ import requests
 import torch
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from scoring import aggregate, apply_market_weight, mentions_stock, stock_needles, time_weight
 
 MODEL = "snunlp/KR-FinBert-SC"
 H = {"User-Agent": "Mozilla/5.0"}
+KST = ZoneInfo("Asia/Seoul")
+TIMEOUT = 10
 
 def load_model():
     tok = AutoTokenizer.from_pretrained(MODEL)
@@ -28,7 +31,7 @@ def score(text: str, tok, model, device, label_to_id) -> dict:
 
 def resolve_stock(query: str) -> tuple[str, str]:
     r = requests.get("https://ac.stock.naver.com/ac",
-                     params={"q": query, "target": "stock"}, headers=H).json()
+                     params={"q": query, "target": "stock"}, headers=H, timeout=TIMEOUT).json()
     items = r.get("items") or []
     if query.isdigit() and len(query) == 6:
         for item in items:
@@ -41,11 +44,11 @@ def resolve_stock(query: str) -> tuple[str, str]:
 
 def fetch_news(code: str, n: int = 20):
     r = requests.get(f"https://m.stock.naver.com/api/news/stock/{code}",
-                     params={"pageSize": n, "page": 1}, headers=H).json()
+                     params={"pageSize": n, "page": 1}, headers=H, timeout=TIMEOUT).json()
     out = []
     for group in r:
         for it in group["items"]:
-            dt = datetime.strptime(it["datetime"], "%Y%m%d%H%M")
+            dt = datetime.strptime(it["datetime"], "%Y%m%d%H%M").replace(tzinfo=KST)
             title = html.unescape(it.get("titleFull") or it.get("title") or "")
             body = html.unescape(it.get("body") or "")
             out.append({"datetime": dt, "title": title,
@@ -79,7 +82,7 @@ def news_sentiment(query: str, tok, model, device, label_to_id,
     if not news:
         return {"code": code, "n": 0, "score_10pt": None}
     if now is None:
-        now = datetime.now()
+        now = datetime.now(KST)
     names = stock_needles(query, official)
     scored = score_news(news, tok, model, device, label_to_id, half_life_days, now, names)
     result = aggregate(scored, label_to_id, half_life_days)
@@ -125,6 +128,6 @@ if __name__ == "__main__":
                 continue
             try:
                 print_result(name, news_sentiment(
-                    name, tok, model, device, label_to_id, now=datetime.now()))
+                    name, tok, model, device, label_to_id, now=datetime.now(KST)))
             except (LookupError, KeyError, requests.RequestException) as e:
                 print(f"조회 실패 ({name}): {e}")
